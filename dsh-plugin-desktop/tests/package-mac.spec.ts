@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   packageMacSmoke,
   type MacSmokePackageOptions,
@@ -50,9 +50,11 @@ describe('macOS DMG smoke packaging', () => {
   it('checks without credentials, builds an unsigned DMG, then verifies it', () => {
     const calls: CommandCall[] = []
     const logs: string[] = []
+    const prepareRuntime = vi.fn()
 
-    packageMacSmoke(options(calls, logs))
+    packageMacSmoke({ ...options(calls, logs), prepareRuntime })
 
+    expect(prepareRuntime).toHaveBeenCalledOnce()
     expect(calls).toHaveLength(3)
     expect(calls[0]).toEqual({
       command: 'corepack',
@@ -78,6 +80,7 @@ describe('macOS DMG smoke packaging', () => {
         PATH: '/usr/bin:/bin',
         SAFE_VALUE: 'kept',
         CSC_IDENTITY_AUTO_DISCOVERY: 'false',
+        DSH_ELECTRON_BUILDER_TRAVERSAL_ONLY: '1',
       },
     })
     expect(calls[2]).toEqual({
@@ -91,6 +94,37 @@ describe('macOS DMG smoke packaging', () => {
     })
     expect(logs).toEqual([
       'Building an unsigned macOS DMG smoke; signing and notarization are release-only steps.',
+    ])
+  })
+
+  it('reuses a completed CI package gate when explicitly requested', () => {
+    const calls: CommandCall[] = []
+    const logs: string[] = []
+    const value = {
+      ...options(calls, logs),
+      env: {
+        ...options(calls).env,
+        DSH_PACKAGE_CHECK_ALREADY_RAN: '1',
+      },
+    }
+
+    packageMacSmoke(value)
+
+    expect(calls).toHaveLength(2)
+    expect(calls[0]?.args).toEqual([
+      '/repo/node_modules/electron-builder/cli.js',
+      '--mac',
+      'dmg',
+      '--universal',
+      '--publish',
+      'never',
+      '--config.mac.notarize=false',
+      '--config.npmRebuild=false',
+      '--config.directories.output=/repo/dsh-plugin-desktop/dist/mac-smoke',
+    ])
+    expect(logs).toEqual([
+      'Building an unsigned macOS DMG smoke; signing and notarization are release-only steps.',
+      'Skipping the macOS package preflight; the package gate already passed.',
     ])
   })
 

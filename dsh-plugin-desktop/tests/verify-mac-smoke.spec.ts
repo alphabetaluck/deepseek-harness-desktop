@@ -15,6 +15,7 @@ interface AppFixture {
   readonly infoPlist: string
   readonly executable: string
   readonly appAsar: string
+  readonly modeOverrides: Map<string, number>
 }
 
 function fixture(): AppFixture {
@@ -27,21 +28,31 @@ function fixture(): AppFixture {
   mkdirSync(resources, { recursive: true })
   const infoPlist = join(contents, 'Info.plist')
   const executable = join(macos, 'DSH Desktop')
-  const appAsar = join(resources, 'app.asar')
+  const appAsar = join(resources, 'app', 'package.json')
+  const modeOverrides = new Map<string, number>()
   writeFileSync(infoPlist, '<?xml version="1.0" encoding="UTF-8"?>')
   writeFileSync(executable, 'binary')
   chmodSync(executable, 0o755)
-  writeFileSync(appAsar, 'packed')
+  modeOverrides.set(executable, 0o755)
+  mkdirSync(join(resources, 'app', 'lib'), { recursive: true })
+  writeFileSync(join(resources, 'app', 'lib', 'main.js'), 'main')
+  writeFileSync(appAsar, '{}')
   for (const entry of MACOS_UNIVERSAL_NATIVE_ENTRIES) {
-    const path = join(`${appAsar}.unpacked`, entry.path)
+    const path = join(join(appAsar, '..'), entry.path)
     mkdirSync(join(path, '..'), { recursive: true })
     writeFileSync(path, 'native')
-    if (entry.path.endsWith('/spawn-helper')) chmodSync(path, 0o755)
+    if (entry.path.endsWith('/spawn-helper')) {
+      chmodSync(path, 0o755)
+      modeOverrides.set(path, 0o755)
+    }
   }
-  return { root, infoPlist, executable, appAsar }
+  return { root, infoPlist, executable, appAsar, modeOverrides }
 }
 
-function options(overrides: Partial<MacSmokeVerificationOptions> = {}) {
+function options(
+  overrides: Partial<MacSmokeVerificationOptions> = {},
+  modeOverrides: ReadonlyMap<string, number> = new Map(),
+) {
   const calls: Array<{ command: string; args: readonly string[] }> = []
   const removeMountPoint = vi.fn()
   const value: MacSmokeVerificationOptions = {
@@ -54,7 +65,11 @@ function options(overrides: Partial<MacSmokeVerificationOptions> = {}) {
     exists: existsSync,
     stat: path => {
       const result = statSync(path)
-      return { size: result.size, isFile: result.isFile(), mode: result.mode }
+      return {
+        size: result.size,
+        isFile: result.isFile(),
+        mode: modeOverrides.get(path) ?? result.mode,
+      }
     },
     ...overrides,
   }
@@ -84,7 +99,7 @@ function expectSmokeFailure(
 describe('macOS DMG smoke artifact verification', () => {
   it('mounts one DMG and accepts a well-formed unsigned application bundle', () => {
     const value = fixture()
-    const harness = options({ makeMountPoint: () => value.root })
+    const harness = options({ makeMountPoint: () => value.root }, value.modeOverrides)
     const appPath = join(value.root, 'DSH Desktop.app')
 
     expect(verifyMacSmoke(harness.value)).toEqual({
@@ -108,7 +123,7 @@ describe('macOS DMG smoke artifact verification', () => {
       { command: 'lipo', args: [value.executable, '-verify_arch', 'arm64'] },
       ...MACOS_UNIVERSAL_NATIVE_ENTRIES.map(entry => ({
         command: 'lipo',
-        args: [join(`${value.appAsar}.unpacked`, entry.path), '-verify_arch', entry.arch],
+        args: [join(join(value.appAsar, '..'), entry.path), '-verify_arch', entry.arch],
       })),
       { command: 'hdiutil', args: ['detach', value.root] },
     ])
@@ -126,7 +141,7 @@ describe('macOS DMG smoke artifact verification', () => {
   it('rejects a missing Info.plist and still detaches', () => {
     const value = fixture()
     rmSync(value.infoPlist)
-    const harness = options({ makeMountPoint: () => value.root })
+    const harness = options({ makeMountPoint: () => value.root }, value.modeOverrides)
 
     expectSmokeFailure(harness, 'Info.plist')
     expect(harness.calls).toEqual([
@@ -142,7 +157,7 @@ describe('macOS DMG smoke artifact verification', () => {
   it('rejects an application without its declared main executable', () => {
     const value = fixture()
     rmSync(value.executable)
-    const harness = options({ makeMountPoint: () => value.root })
+    const harness = options({ makeMountPoint: () => value.root }, value.modeOverrides)
 
     expectSmokeFailure(harness, 'main executable')
     expect(harness.removeMountPoint).toHaveBeenCalledWith(value.root)
@@ -151,18 +166,19 @@ describe('macOS DMG smoke artifact verification', () => {
   it('rejects a non-executable main file', () => {
     const value = fixture()
     chmodSync(value.executable, 0o644)
-    const harness = options({ makeMountPoint: () => value.root })
+    value.modeOverrides.set(value.executable, 0o644)
+    const harness = options({ makeMountPoint: () => value.root }, value.modeOverrides)
 
     expectSmokeFailure(harness, 'invalid main executable')
     expect(harness.removeMountPoint).toHaveBeenCalledWith(value.root)
   })
 
-  it('rejects a missing or empty application archive', () => {
+  it('rejects a missing or empty application manifest', () => {
     const value = fixture()
     rmSync(value.appAsar)
-    const harness = options({ makeMountPoint: () => value.root })
+    const harness = options({ makeMountPoint: () => value.root }, value.modeOverrides)
 
-    expectSmokeFailure(harness, 'app.asar')
+    expectSmokeFailure(harness, 'package.json')
     expect(harness.removeMountPoint).toHaveBeenCalledWith(value.root)
   })
 })

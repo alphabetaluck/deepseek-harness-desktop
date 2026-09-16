@@ -2,58 +2,65 @@
 
 [English](README.md)
 
-DSH Community Market 是为 [DSH Desktop](../README.md) 规划的插件市场壳。它将帮助用户发现社区插件、了解插件用途，并通过一次清晰的确认操作，把插件安装到当前正在使用的工作配置中。
+DSH Community Market 是 [DSH Desktop](../README.md) 内置的开放插件市场。它从用户选择的目录来源发现插件，并针对当前 Desktop Profile 执行简单的 npm package 操作。
 
-> **当前状态：文档优先的初始化工程。** 这个 workspace 还没有市场页面、目录客户端或安装器，在首个可用实现完成前保持 monorepo 私有。现在不要把它加入 DSH profile。
+> 目录收录或显示为可安装，不代表安全审核、兼容性保证或推荐。插件安装后会以用户权限作为本地代码运行。
 
-## 我们要做什么
+## 产品行为
 
-第一个可用版本只需要完成一条简单、容易理解的流程：
+Market 包含四个视图：
 
-1. 浏览和搜索社区插件目录。
-2. 打开插件详情，查看用途、源码仓库和安全提示。
-3. 点击“安装”，确认准确的插件与当前工作配置。
-4. 由 Desktop 调用已有的受管 DSH 插件命令。
-5. 配置修改完成后，提示用户重启 Desktop。
+1. **发现**：浏览当前来源，支持搜索、分类筛选、详情和来源归属信息。
+2. **可安装**：显示能够提供唯一 npm package 身份的标准化条目，不信任来源提供的版本。
+3. **已安装**：读取当前 Profile 的直接插件依赖。无论插件由本 Market、其他市场还是 DSH CLI 安装，都会显示；可移除插件只提供**卸载**，核心 bundle 保持只读。
+4. **来源**：保存、排序和选择目录来源；同一时间只选择一个来源浏览。
 
-市场只是现有 DSH 能力之上的产品壳，不会再发明一套插件格式、包管理器、profile 存储或高权限安装器。
+Renderer 在安装时不会提交 package name 或 package-manager 命令，只提交被选中的来源和条目身份。Host 再解析自己此前观察到的标准化 package 身份。
+
+## 自动安装
+
+自动安装只保留很小的一组资格条件：
+
+- 当前目录条目提供且只提供一个合法 npm package name；
+- 该 package 不是 Desktop 自己拥有的产品 bundle；
+- npm 官方 registry 的 `latest` 接口返回相同 package name 和一个精确稳定版本；以及
+- npm manifest 声明合法的 `dsh.bundle.patch` 路径。
+
+来源版本、验证徽章、仓库是否一致、deprecated metadata、lifecycle script、engine 范围、tarball integrity metadata 和 build-allowance 声明，都不决定 Market 是否允许安装。pnpm 负责解析并安装用户确认的精确 npm 版本。
+
+用户确认后，Host 只调用 `desktopPnpm.run(argv)`，添加精确 npm 版本，并把 package 写入 `dsh.profile.bundles`。Market 不创建安装 receipt、快照、重试、清理或回滚路径；恢复统一交给 Desktop 的三个健康启动 checkpoint 槽位。
+
+## 卸载与其他市场兼容
+
+**已安装**视图来自当前 Profile 的直接依赖和 bundle 列表，不依赖 Market receipt 或当前目录来源。因此，其他市场和 DSH CLI 安装的插件无需额外适配也能正确显示。
+
+卸载 preview 只接受 Desktop 清单返回的、当前 generation 有效的不透明 `bundleId`。Host 将它解析为当前直接依赖，确认可以移除后执行 `desktopPnpm.run(['remove', packageName])`。Market 不提供启用或禁用操作。
 
 ## 目录来源
 
-市场不设默认目录。用户可以选择要启用的来源、调整它们的顺序，也可以添加符合公开目录合同的来源。每个来源都在适配器之后独立运行，市场界面只能看到同一套经过校验和标准化的数据。
+任何人都可以发布符合公开 [`catalog-source`](docs/schemas/catalog-source.schema.json) 与 [`catalog-provider-page`](docs/schemas/catalog-provider-page.schema.json) 合同的来源；现有 API 也可以通过经过审查的本地 adapter 接入。远端数据会在 Client 看到前完成标准化，provider 命令永远不会被展示或执行。
 
-[DSH 1024Store](https://github.com/imsai-sh/awesome-deepseek-harness-plugins) 是目前与本项目合作的目录提供方之一。我们计划为它的公开 API 提供经过审查的适配器，但合作关系不代表默认启用、排序优先、未选择来源时的兜底，也不代表对其收录内容的推荐。该项目独立维护插件发现、校验、网站、API 和另行发布的 `dsh-1024store` 插件。DSH Community Market 不是该插件的 fork、重新打包版本或官方客户端。
+[DSH 1024Store](https://github.com/imsai-sh/awesome-deepseek-harness-plugins) 是可选合作来源。Desktop 使用当前分页的 `/api/v2/plugins` 目录完成浏览、搜索、排序和分类，不再依赖冻结在 500 条的 v1 兼容 feed。v2 命令绝不会被执行：只有严格匹配纯文本 `dsh plugin --profile … add <npm-package>` 的形状才会贡献 npm package 身份，安装 preview 仍以 npm `latest` 为版本权威。仅有 GitHub 目标的条目保持可浏览，但不会被标成可自动安装。
 
-所有目录数据都是远程、且不可信的输入。项目被收录只表示提供方返回了相关元数据；这**不表示** Anywhere Labs 已经审核、推荐或保证该插件。
+[dshfind](https://dshfind.com) 是另一个可选合作来源。它的 adapter 会遍历带版本的 REST 页面，并从结构化字段标准化 npm 身份，不执行 provider 命令。Provider 版本只作信息展示；自动安装仍然解析 npm `latest`。
 
-## 安全承诺
+来源请求仅允许 HTTPS，不携带凭据，具备边界限制，并防止不安全重定向和私有网络目标。来源故障不会改变用户选择，也不会阻止 DSH Desktop 启动。
 
-- 后台浏览不会安装任何包，也不会执行仓库代码。
-- 只有用户明确点击并确认后，安装才会开始。
-- 市场会根据经过校验的 package 或仓库身份，独立解析并锁定安装目标；绝不执行目录返回的命令字符串。
-- 确认框会展示准确来源和当前工作配置。
-- 插件变更使用 Desktop 已有的受管 DSH 插件服务，并且一次只执行一个操作。
-- 第一版不包含账号、遥测、静默安装、插件自动更新或自建目录后台。
+## 手动安装
 
-插件会以用户权限作为本地代码运行，安装过程中还可能执行 package lifecycle script。实现或审核安装功能前，请先阅读[安全说明](SECURITY.zh.md)。
+自动安装不可用时，详情弹窗可以显示 Host 根据标准化身份重建的、有界且只用于展示的 npm 命令。**打开 DSH 终端**只打开 Desktop 终端，不会粘贴或执行该命令。
+
+如果自动安装已经开始但 pnpm 失败，Desktop 会保留有上限的 stdout/stderr 尾部，将其写入 Desktop 日志，并在失败弹窗中显示同一份诊断输出。弹窗提供 Host 推导的精确命令和**打开 DSH 终端**，供用户手动继续；已经消费的确认不会被自动重试。
 
 ## 文档
 
-- [市场壳设计](docs/market-shell.zh.md)：产品边界、架构、profile、失败处理和交付阶段。
-- [目录提供方合同](docs/catalog-provider-contract.zh.md)：来源 manifest、查询参数、wire/标准化 JSON、多来源行为和实现交接要求。
-- [安全说明](SECURITY.zh.md)：信任模型、漏洞反馈和不可妥协的安装规则。
-- [Desktop 插件服务](../dsh-plugin-desktop/docs/plugin-services.zh.md)：未来实现会使用的 `desktopProfiles` 与 `desktopPnpm` 合同。
-- [DSH 插件开发](../docs/plugin-development.md)：普通 DSH 与 Desktop 共用的插件模型。
+- [安装与卸载](docs/install-and-uninstall.zh.md)
+- [Market shell](docs/market-shell.zh.md)
+- [目录提供方合同](docs/catalog-provider-contract.zh.md)
+- [目录适配器指南](docs/catalog-adapter-guide.zh.md)
+- [安全策略](SECURITY.zh.md)
+- [Desktop 插件服务](../dsh-plugin-desktop/docs/plugin-services.zh.md)
 
-## 交付计划
+## 许可证与归属
 
-- **Phase 0 — 当前：** 确认包归属，写清产品与信任边界，建立 headless 检查。
-- **Phase 1：** 来源选择、用户添加符合规范的来源、多来源只读浏览、搜索、分类、插件详情，以及完整的加载、空白和错误状态。
-- **Phase 2：** 通过 Desktop 受管服务，明确安装到当前 profile。
-- **后续：** 卸载、更新、失败恢复和更丰富的验证信号。
-
-目录采集、投稿审核、账号、排行榜和托管仍由目录 provider 负责，不属于这个 package。
-
-## 许可证与来源说明
-
-package 代码与文档遵循 [MIT License](LICENSE)。当前初始化工程没有打包 DSH 1024Store 的代码、素材或目录快照。它的公开目录元数据采用 CC0-1.0，具体来源与历史由[上游目录项目](https://github.com/imsai-sh/awesome-deepseek-harness-plugins)记录。
+Package 代码和文档使用 [MIT License](LICENSE)。本 package 不内置任何第三方目录快照、provider 命令或 artwork；目录提供方是独立项目，并自行负责其 metadata 与服务策略。

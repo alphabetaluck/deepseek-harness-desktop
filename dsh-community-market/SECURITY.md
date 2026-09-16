@@ -1,41 +1,39 @@
-# Security policy
+# Security Policy
 
-[中文](SECURITY.zh.md)
-
-## Current status
-
-`dsh-community-market` is currently a private, documentation-only scaffold. It has no runtime entry, network request, user interface, or installer. There is no released functional version to add to a DSH profile.
+[中文说明](SECURITY.zh.md)
 
 ## Trust model
 
-Future catalog responses are untrusted remote input. A catalog listing is not a security review, compatibility promise, maintainer verification, or endorsement. Plugin repository links and display metadata must be validated and rendered as inert data.
+Catalog responses are untrusted remote data. A listing, provider badge, repository link, or **Installable** result is not a security review, maintainer verification, recommendation, or compatibility guarantee.
 
-Installing a plugin is a higher-risk action than browsing. A plugin runs locally with the user's permissions, and its package installation may execute lifecycle scripts. The future installer must therefore preserve all of these rules:
+Installed plugins and their dependency trees run locally with the user's permissions. The Market intentionally does not claim to inspect their code or dependencies for malicious behavior.
 
-- installation starts only after an explicit user gesture and confirmation;
-- the exact canonical source, derived install target, and active profile are visible before execution;
-- no command string, script, or HTML from a catalog response is executed;
-- Desktop installation goes through the managed `desktopPnpm.runPlugin()` capability;
-- operations are cancellable, serialized, and joined during service teardown;
-- credentials, environment variables, raw response bodies, and local paths are not exposed to the UI or logs;
-- a catalog failure never blocks DSH or Desktop startup.
+## Package-operation boundary
 
-Any implementation that weakens these rules needs an explicit security review before merge.
+- Installation starts only after explicit user confirmation.
+- The confirmation shows the Host-resolved npm package, npm `latest` stable version, and active Profile.
+- Provider commands, scripts, HTML, headers, credentials, and package-manager argv are never accepted from catalog data.
+- Automatic installation requires one valid npm package identity and a valid `dsh.bundle.patch` declaration in the official npm `latest` manifest.
+- Source-provided versions and verification claims are not installation authority.
+- Market package changes use only `desktopPnpm.run(argv)` and run one at a time.
+- The Renderer submits source/item identities for install or an opaque Desktop `bundleId` for uninstall; it never chooses an arbitrary package name at execution time.
+- Installed inventory comes from current Profile direct dependencies, so packages installed by other markets or the DSH CLI are visible. Removable direct dependencies offer uninstall only; Market exposes no enable or disable operation.
+- Market creates no install receipt, install-specific snapshot, retry, cleanup, or rollback. Recovery is owned by Desktop's unified three-slot healthy-start checkpoints.
+- A successful mutation may issue a short-lived one-shot restart grant. Restart remains an explicit user action.
+- **Open DSH Terminal** carries an empty body and only opens Desktop's terminal; it never pastes or executes a displayed command.
 
-## User-added catalog sources
+These rules constrain authority and identity. They do not make a third-party plugin safe.
 
-Adding a source is a separate, explicit user action; a remote manifest cannot enable itself or choose its priority. The production client accepts HTTPS catalog endpoints only. It must reject URL credentials, fragments, unsafe schemes, and redirects to loopback, private, link-local, or cloud-metadata addresses. Every redirect and DNS resolution is checked again so an initially public URL cannot become a private-network request.
+## Catalog sources
 
-Source requests use no ambient cookies or credentials. They have bounded redirects, timeouts, concurrency, decoded response size, item count, nesting, and string lengths. The response must be JSON and pass the published schema before normalization. Remote adapter code, scripts, HTML, install commands, headers, and secrets are never accepted from a source manifest. A development-only loopback exception must be visibly enabled and must never change production defaults.
+Adding or selecting a source is an explicit local action. A remote manifest cannot enable itself, choose priority, supply adapter code, or supply credentials.
 
-Each selected source fails independently. Failure of one source may be shown beside its source name, but must not hide successful results from other sources, trigger a fallback source, modify the user's selection, or block DSH/Desktop startup.
+Production source requests are HTTPS-only and credential-free. They enforce bounded redirects, timeouts, concurrency, decoded response size, item counts, nesting, and string lengths. Redirect and DNS targets are checked against loopback, private, link-local, and cloud-metadata destinations. JSON must satisfy the published schema before normalization.
+
+Exactly one source is selected for browsing. Source failure never silently selects a fallback, changes the active Profile, or blocks DSH Desktop startup.
 
 ## Reporting a vulnerability
 
-Please report a suspected vulnerability privately to [t4wefan@qq.com](mailto:t4wefan@qq.com). Include the affected version or commit, operating system, reproduction steps, expected impact, and any proof of concept that can be shared safely.
+Report suspected vulnerabilities privately to [t4wefan@qq.com](mailto:t4wefan@qq.com). Include the affected version or commit, operating system, reproduction steps, expected impact, and a minimal proof of concept that can be shared safely.
 
-Do not include secrets or personal data. Please do not open a public issue for an unpatched vulnerability. Ordinary bugs, catalog metadata corrections, and feature requests can use the repository's public issue tracker.
-
-## Dependency and catalog reports
-
-A vulnerability in a listed third-party plugin should normally be reported to that plugin's maintainer. A bad or misleading catalog entry should also be reported to the catalog provider, whether it is a cooperating provider or a source added by the user. Report it here as well only when the market shell itself mishandles the entry or presents an unsafe action.
+Do not include secrets or personal data, and do not open a public issue for an unpatched vulnerability. Ordinary bugs, catalog corrections, and feature requests may use the public issue tracker.
